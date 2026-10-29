@@ -45,7 +45,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install numpy==1.26.4 onnx==1.19.1 onnxruntime==1.24.3 opencv-python-headless pillow
-          git clone --depth 1 https://github.com/itayinbar/heb-ocr.git /tmp/heb-ocr
+          mkdir -p /tmp/heb-ocr
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://codeload.github.com/itayinbarr/heb-ocr/tar.gz/refs/heads/main" \
+            -o /tmp/heb-ocr.tar.gz
+          tar -xzf /tmp/heb-ocr.tar.gz --strip-components=1 -C /tmp/heb-ocr
+          test -f /tmp/heb-ocr/hebocr/recognize.py
           curl -fL --retry 3 --retry-delay 2 \
             "https://huggingface.co/itayinbar/Mishkefet-v1/resolve/main/mishkefet-v1.pt?download=true" \
             -o /tmp/mishkefet-v1.pt
