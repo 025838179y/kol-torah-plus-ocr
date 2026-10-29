@@ -39,9 +39,9 @@ jobs:
         run: |
           mkdir -p app/src/main/assets
           curl -fL --retry 3 --retry-delay 2 \
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" \
-            -o app/src/main/assets/ggml-tiny.bin
-          test "$(stat -c%s app/src/main/assets/ggml-tiny.bin)" -gt 50000000
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin" \
+            -o app/src/main/assets/ggml-tiny-q5_1.bin
+          test "$(stat -c%s app/src/main/assets/ggml-tiny-q5_1.bin)" -gt 25000000
 
       - name: Download Hebrew OCR language data
         run: |
