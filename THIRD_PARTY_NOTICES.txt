@@ -1,0 +1,12 @@
+Third-party components included in this application:
+
+1. whisper.cpp — MIT License
+   https://github.com/ggml-org/whisper.cpp
+
+2. Tesseract4Android — Apache License 2.0
+   https://github.com/adaptech-cz/Tesseract4Android
+
+3. Tesseract OCR Hebrew traineddata (tessdata_best)
+   https://github.com/tesseract-ocr/tessdata_best
+
+The language data is packaged in the APK for offline operation. Consult each upstream repository for complete license terms.
