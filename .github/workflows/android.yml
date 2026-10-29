@@ -1,0 +1,66 @@
+name: Build Kol Torah APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "cmake;3.22.1" "ndk;26.3.11579264"
+
+      - name: Download multilingual offline speech model
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" \
+            -o app/src/main/assets/ggml-tiny.bin
+          test "$(stat -c%s app/src/main/assets/ggml-tiny.bin)" -gt 50000000
+
+      - name: Download Hebrew OCR language data
+        run: |
+          mkdir -p app/src/main/assets/tessdata
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/heb.traineddata" \
+            -o app/src/main/assets/tessdata/heb.traineddata
+          test "$(stat -c%s app/src/main/assets/tessdata/heb.traineddata)" -gt 500000
+
+      - name: Build debug APK
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.3.11579264
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kol-torah-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
