@@ -82,12 +82,13 @@ public class MainActivity extends Activity {
     private File recordingFile;
     private RandomAccessFile recordingOutput;
     private long audioDataBytes = 0;
-    private volatile boolean nativeAvailable = true;
+    private static volatile boolean nativeAvailable = false;
     private boolean busy = false;
 
     static {
         try {
             System.loadLibrary("koltorah");
+            nativeAvailable = true;
         } catch (Throwable ignored) {
             // The interface and document editor remain usable if native ASR isn't built.
         }
@@ -448,38 +449,29 @@ public class MainActivity extends Activity {
     }
 
     private void importAudio(Uri uri) {
-        setStatus("קורא את קובץ השמע…");
+        setStatus("מכין את קובץ השמע לתמלול…");
         new Thread(() -> {
             try {
                 String name = getDisplayName(uri);
-                String lower = name.toLowerCase(Locale.ROOT);
-                if (!lower.endsWith(".wav")) {
-                    runOnUiThread(() -> {
-                        selectedAudioText.setText("נבחר: " + name);
-                        toast("בגרסה זו התמלול מקבל קובצי WAV מסוג PCM בלבד. אפשר לייבא WAV או להקליט דרך האפליקציה.");
-                    });
-                    return;
-                }
                 File dir = new File(getCacheDir(), "imported");
-                if (!dir.exists()) dir.mkdirs();
-                File target = new File(dir, "import-" + System.currentTimeMillis() + ".wav");
-                try (InputStream in = new BufferedInputStream(getContentResolver().openInputStream(uri));
-                     OutputStream out = new BufferedOutputStream(new FileOutputStream(target))) {
-                    byte[] buf = new byte[32768];
-                    int count;
-                    while ((count = in.read(buf)) != -1) out.write(buf, 0, count);
-                }
-                if (!isWave(target)) throw new java.io.IOException("הקובץ אינו WAV תקין");
+                if (!dir.exists() && !dir.mkdirs()) throw new java.io.IOException("לא ניתן ליצור תיקיית ייבוא");
+                File target = new File(dir, "audio-" + System.currentTimeMillis() + ".wav");
+                boolean wav = name.toLowerCase(Locale.ROOT).endsWith(".wav");
+                if (!wav) runOnUiThread(() -> selectedAudioText.setText("ממיר שמע ל־WAV מקומי…"));
+                AudioConverter.prepare(this, uri, name, target);
                 selectedWav = target;
                 runOnUiThread(() -> {
-                    selectedAudioText.setText("נבחר קובץ: " + name);
+                    selectedAudioText.setText("השמע מוכן: " + name);
                     transcribeButton.setEnabled(true);
-                    toast("קובץ השמע מוכן לתמלול.");
+                    toast("השמע מוכן לתמלול במכשיר.");
                 });
             } catch (Exception e) {
+                String message = e.getMessage() == null ? "הקובץ אינו נתמך" : e.getMessage();
                 runOnUiThread(() -> {
-                    selectedAudioText.setText("לא ניתן לטעון את הקובץ.");
-                    toast("שגיאה בקריאת הקובץ. נסה לבחור קובץ WAV מסוג PCM.");
+                    selectedWav = null;
+                    transcribeButton.setEnabled(false);
+                    selectedAudioText.setText("לא ניתן להכין את קובץ השמע.");
+                    toast("ייבוא השמע נכשל: " + message);
                 });
             }
         }, "KolTorahImport").start();
@@ -520,9 +512,9 @@ public class MainActivity extends Activity {
         selectedAudioText.setText("מכין את מודל התמלול המקומי בפעם הראשונה…");
         new Thread(() -> {
             try {
-                File model = new File(getFilesDir(), "ggml-tiny.bin");
-                if (!model.exists() || model.length() < 20_000_000L) {
-                    try (InputStream in = new BufferedInputStream(getAssets().open("ggml-tiny.bin"));
+                File model = new File(getFilesDir(), "ggml-tiny-q5_1.bin");
+                if (!model.exists() || model.length() < 25_000_000L) {
+                    try (InputStream in = new BufferedInputStream(getAssets().open("ggml-tiny-q5_1.bin"));
                          OutputStream out = new BufferedOutputStream(new FileOutputStream(model))) {
                         byte[] buf = new byte[1024 * 1024];
                         int n;
@@ -535,23 +527,32 @@ public class MainActivity extends Activity {
                         }
                     }
                 }
-                if (!nativeAvailable) throw new IllegalStateException("מנוע התמלול אינו זמין בגרסת הבנייה הזו.");
-                runOnUiThread(() -> selectedAudioText.setText("מתמלל בעברית במכשיר…"));
-                String raw = nativeTranscribe(selectedWav.getAbsolutePath(), model.getAbsolutePath(), "he");
-                if (raw == null || raw.trim().isEmpty()) throw new IllegalStateException("לא התקבל תמלול. בדוק שקובץ ה־WAV הוא PCM 16-bit ושיש בו דיבור ברור.");
+                if (!nativeAvailable) throw new IllegalStateException("רכיב התמלול המקומי לא נטען במכשיר. התקן את הגרסה העדכנית.");
+                runOnUiThread(() -> selectedAudioText.setText("מתמלל בעברית במכשיר. שיעור ארוך עשוי להימשך…"));
+                long startedAt = System.currentTimeMillis();
+                String raw;
+                try {
+                    raw = nativeTranscribe(selectedWav.getAbsolutePath(), model.getAbsolutePath(), "he");
+                } catch (UnsatisfiedLinkError e) {
+                    nativeAvailable = false;
+                    throw new IllegalStateException("רכיב התמלול המקומי לא נטען. ייתכן שהמכשיר אינו נתמך.");
+                }
+                if (raw == null || raw.trim().isEmpty()) throw new IllegalStateException("מנוע התמלול החזיר תוצאה ריקה. בדוק שהקלטה מכילה דיבור ברור.");
+                if (raw.startsWith("ERROR:")) throw new IllegalStateException(raw.substring(6).trim());
+                final long elapsedSeconds = Math.max(1, (System.currentTimeMillis() - startedAt) / 1000);
                 String result = applyDictionary(raw.trim());
                 runOnUiThread(() -> {
                     transcriptEditor.setText(result);
                     transcriptEditor.setSelection(transcriptEditor.length());
-                    selectedAudioText.setText("התמלול הסתיים • ניתן לערוך ולייצא");
+                    selectedAudioText.setText("התמלול הסתיים • " + elapsedSeconds + " שניות עיבוד");
                     toast("התמלול הושלם. מומלץ לעבור על שמות ומונחים תורניים.");
                 });
             } catch (Exception e) {
                 String msg = e.getMessage() == null ? "שגיאה לא צפויה" : e.getMessage();
                 runOnUiThread(() -> {
                     selectedAudioText.setText("התמלול לא הושלם.");
-                    toast(msg.contains("ggml-tiny.bin") || msg.contains("assets") ?
-                        "מודל התמלול אינו כלול בבנייה הזו. הרץ את תהליך Build APK שבמאגר GitHub." : "לא ניתן לתמלל: " + msg);
+                    toast(msg.contains("ggml-tiny-q5_1.bin") || msg.contains("assets") ?
+                        "מודל התמלול חסר בקובץ ההתקנה. התקן את הגרסה העדכנית." : "לא ניתן לתמלל: " + msg);
                 });
             } finally {
                 busy = false;
