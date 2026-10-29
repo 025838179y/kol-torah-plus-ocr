@@ -5,18 +5,24 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.exifinterface.media.ExifInterface;
 
 import com.googlecode.tesseract.android.TessBaseAPI;
 
@@ -40,6 +46,8 @@ public class HandwritingActivity extends Activity {
     private ProgressBar progress;
     private Button recognizeButton;
     private Button returnButton;
+    private Spinner engineSpinner;
+    private CheckBox accurateCheckBox;
     private boolean busy = false;
 
     @Override protected void onCreate(Bundle savedInstanceState) {
@@ -95,7 +103,7 @@ public class HandwritingActivity extends Activity {
         header.setBackgroundColor(INK);
         header.setPadding(dp(20), dp(18), dp(20), dp(20));
         header.addView(text("כתב יד לטקסט", 26, WHITE, true), lp(-1, 42));
-        header.addView(text("זיהוי מקומי • בלי אינטרנט • בלי שכתוב אוטומטי", 13, Color.rgb(203, 219, 216), false), lp(-1, 30));
+        header.addView(text("מודל כתב יד עברי ייעודי • עובד מקומית", 13, Color.rgb(203, 219, 216), false), lp(-1, 30));
         root.addView(header, lp(-1, -2));
 
         ScrollView scroll = new ScrollView(this);
@@ -103,10 +111,25 @@ public class HandwritingActivity extends Activity {
         body.setPadding(dp(16), dp(16), dp(16), dp(24));
 
         body.addView(text("1. בחר צילום או תמונה של הדף", 19, INK, true), lp(-1, 38));
-        TextView explainer = text("אפשר לבחור תמונה מהטלפון. העיבוד נעשה במכשיר והטקסט שיופק יישלח לעורך של קול תורה בדיוק כפי שהמנוע זיהה אותו — ללא תיקון או ניסוח מחדש.", 13, MUTED, false);
+        TextView explainer = text("לכתב יד בחר במנוע הייעודי: הוא מפצל דף לשורות ומזהה כתב יד עברי במכשיר. התוצאה מועברת לעורך כפי שהמודל זיהה אותה — ללא תיקון איות או שכתוב.", 13, MUTED, false);
         explainer.setGravity(Gravity.RIGHT | Gravity.TOP);
         explainer.setLineSpacing(dp(3), 1.0f);
         body.addView(explainer, lp(-1, -2));
+
+        body.addView(text("סוג הטקסט", 14, INK, true), lp(-1, 30));
+        engineSpinner = new Spinner(this);
+        String[] engines = {"כתב יד עברי — מודל ייעודי", "טקסט מודפס — OCR"};
+        ArrayAdapter<String> engineAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, engines);
+        engineAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        engineSpinner.setAdapter(engineAdapter);
+        body.addView(engineSpinner, lp(-1, 48));
+
+        accurateCheckBox = new CheckBox(this);
+        accurateCheckBox.setText("שיפור דיוק (כמה קריאות לכל שורה, עשוי להיות איטי יותר)");
+        accurateCheckBox.setTextSize(13);
+        accurateCheckBox.setTextColor(INK);
+        accurateCheckBox.setChecked(false);
+        body.addView(accurateCheckBox, lp(-1, 48));
 
         Button choose = button("בחירת תמונה", true);
         LinearLayout.LayoutParams chooseLp = lp(-1, 50);
@@ -165,7 +188,7 @@ public class HandwritingActivity extends Activity {
         cancelLp.topMargin = dp(8);
         body.addView(cancel, cancelLp);
 
-        TextView foot = text("לתשומת לבך: מנוע ה־OCR המקומי אינו מאומן במיוחד לכל סגנונות כתב היד. דיוק הזיהוי תלוי בכתב, בתאורה ובחדות התמונה.", 12, MUTED, false);
+        TextView foot = text("המודל הייעודי מיועד לכתב יד עברי מודרני. הוא עשוי לטעות בכתב חריג, רש״י, קיצורים או צילום מטושטש. המודל ניתן לשימוש לא־מסחרי בלבד לפי רישיונו.", 12, MUTED, false);
         foot.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         foot.setLineSpacing(dp(2), 1f);
         LinearLayout.LayoutParams footLp = lp(-1, -2);
@@ -213,6 +236,14 @@ public class HandwritingActivity extends Activity {
     }
 
     private Bitmap decodeScaled(Uri uri, int maxDimension) throws Exception {
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        try (InputStream exifInput = getContentResolver().openInputStream(uri)) {
+            if (exifInput != null) {
+                ExifInterface exif = new ExifInterface(exifInput);
+                orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+            }
+        } catch (Exception ignored) {}
+
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         try (InputStream input = getContentResolver().openInputStream(uri)) {
@@ -224,9 +255,21 @@ public class HandwritingActivity extends Activity {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inSampleSize = sample;
         options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        Bitmap decoded;
         try (InputStream input = getContentResolver().openInputStream(uri)) {
-            return BitmapFactory.decodeStream(input, null, options);
+            decoded = BitmapFactory.decodeStream(input, null, options);
         }
+        if (decoded == null) return null;
+        float degrees = 0;
+        if (orientation == ExifInterface.ORIENTATION_ROTATE_90) degrees = 90;
+        else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) degrees = 180;
+        else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) degrees = 270;
+        if (degrees == 0) return decoded;
+        Matrix matrix = new Matrix();
+        matrix.postRotate(degrees);
+        Bitmap corrected = Bitmap.createBitmap(decoded, 0, 0, decoded.getWidth(), decoded.getHeight(), matrix, true);
+        if (corrected != decoded) decoded.recycle();
+        return corrected;
     }
 
     private File ensureHebrewData() throws Exception {
@@ -250,42 +293,131 @@ public class HandwritingActivity extends Activity {
         if (busy || selectedImage == null) return;
         busy = true;
         recognizeButton.setEnabled(false);
+        returnButton.setEnabled(false);
         progress.setVisibility(View.VISIBLE);
-        status.setText("מזהה טקסט בעברית במכשיר…");
+        recognizedText.setText("");
+        boolean handwriting = engineSpinner.getSelectedItemPosition() == 0;
+        status.setText(handwriting ? "טוען מודל כתב יד מקומי…" : "מכין OCR לטקסט מודפס…");
+
         new Thread(() -> {
-            TessBaseAPI tess = new TessBaseAPI();
-            String raw = null;
+            String result = null;
             String error = null;
+            float confidence = -1f;
+            int lines = 0;
             try {
-                File root = ensureHebrewData();
-                if (!tess.init(root.getAbsolutePath(), "heb")) {
-                    throw new java.io.IOException("מנוע הזיהוי לא הצליח לטעון את נתוני העברית");
+                if (handwriting) {
+                    try (HandwritingRecognizer recognizer = new HandwritingRecognizer(this)) {
+                        HandwritingRecognizer.RecognitionResult output = recognizer.recognizePage(
+                                selectedImage, accurateCheckBox.isChecked(),
+                                message -> runOnUiThread(() -> status.setText(message)));
+                        result = output.text;
+                        confidence = output.confidence;
+                        lines = output.lines;
+                    }
+                } else {
+                    PrintedResult output = recognizePrinted(selectedImage);
+                    result = output.text;
+                    confidence = output.confidence;
+                    lines = 1;
                 }
-                tess.setImage(selectedImage);
-                raw = tess.getUTF8Text();
-                if (raw == null || raw.trim().isEmpty()) throw new java.io.IOException("לא זוהה טקסט בתמונה");
+                if (result == null || result.trim().isEmpty()) throw new java.io.IOException("לא זוהה טקסט בתמונה");
             } catch (Exception e) {
-                error = e.getMessage() == null ? "שגיאה בזיהוי" : e.getMessage();
-            } finally {
-                try { tess.recycle(); } catch (Exception ignored) {}
+                error = e.getMessage() == null ? "שגיאה לא צפויה בזמן הזיהוי" : e.getMessage();
             }
-            final String result = raw;
-            final String problem = error;
+
+            final String finalResult = result;
+            final String finalError = error;
+            final float finalConfidence = confidence;
+            final int finalLines = lines;
             runOnUiThread(() -> {
                 busy = false;
                 progress.setVisibility(View.GONE);
                 recognizeButton.setEnabled(selectedImage != null);
-                if (problem != null) {
+                if (finalError != null) {
                     status.setText("הזיהוי לא הושלם.");
-                    Toast.makeText(this, problem, Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, finalError, Toast.LENGTH_LONG).show();
                 } else {
-                    recognizedText.setText(result);
+                    recognizedText.setText(finalResult);
                     recognizedText.setSelection(recognizedText.length());
                     returnButton.setEnabled(true);
-                    status.setText("הזיהוי הסתיים. לא הופעל תיקון אוטומטי.");
+                    String confidenceText = finalConfidence >= 0 ? " • ציון ביטחון משוער " + Math.round(finalConfidence) + "%" : "";
+                    String lineText = handwriting ? " • " + finalLines + " שורות" : "";
+                    status.setText("הזיהוי הסתיים. הטקסט לא תוקן אוטומטית" + lineText + confidenceText + ".");
                 }
             });
-        }, "KolTorahHandwritingOCR").start();
+        }, "KolTorahOCR").start();
+    }
+
+    private static final class PrintedResult {
+        final String text;
+        final float confidence;
+        PrintedResult(String text, float confidence) { this.text = text; this.confidence = confidence; }
+    }
+
+    /** Fallback for printed text: compare original and contrast-normalized input. */
+    private PrintedResult recognizePrinted(Bitmap source) throws Exception {
+        File root = ensureHebrewData();
+        TessBaseAPI tess = new TessBaseAPI();
+        Bitmap enhanced = null;
+        try {
+            if (!tess.init(root.getAbsolutePath(), "heb")) throw new java.io.IOException("מנוע OCR לא הצליח לטעון עברית");
+            tess.setVariable("preserve_interword_spaces", "1");
+            enhanced = contrastBitmap(source);
+            Bitmap[] inputs = {source, enhanced};
+            int[] modes = {TessBaseAPI.PageSegMode.PSM_AUTO, TessBaseAPI.PageSegMode.PSM_SINGLE_BLOCK};
+            String best = "";
+            float bestScore = -1f, bestConfidence = 0f;
+            for (Bitmap image : inputs) {
+                for (int mode : modes) {
+                    tess.setPageSegMode(mode);
+                    tess.setImage(image);
+                    String candidate = tess.getUTF8Text();
+                    if (candidate == null || candidate.trim().isEmpty()) continue;
+                    float confidence = tess.meanConfidence();
+                    float score = confidence + Math.min(10f, candidate.trim().length() / 30f);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestConfidence = confidence;
+                        best = candidate;
+                    }
+                }
+            }
+            if (best.isEmpty()) throw new java.io.IOException("OCR לא מצא טקסט מודפס בתמונה");
+            return new PrintedResult(best, bestConfidence);
+        } finally {
+            try { tess.recycle(); } catch (Exception ignored) {}
+            if (enhanced != null && enhanced != source && !enhanced.isRecycled()) enhanced.recycle();
+        }
+    }
+
+    private Bitmap contrastBitmap(Bitmap source) {
+        int width = source.getWidth(), height = source.getHeight();
+        int[] pixels = new int[width * height];
+        source.getPixels(pixels, 0, width, 0, 0, width, height);
+        int[] histogram = new int[256], gray = new int[pixels.length];
+        for (int i = 0; i < pixels.length; i++) {
+            int p = pixels[i];
+            int value = (((p >> 16) & 255) * 299 + ((p >> 8) & 255) * 587 + (p & 255) * 114) / 1000;
+            gray[i] = value;
+            histogram[value]++;
+        }
+        int low = percentile(histogram, pixels.length, 0.02f);
+        int high = percentile(histogram, pixels.length, 0.98f);
+        if (high <= low + 8) return Bitmap.createBitmap(source);
+        for (int i = 0; i < pixels.length; i++) {
+            int value = Math.max(0, Math.min(255, (gray[i] - low) * 255 / (high - low)));
+            pixels[i] = Color.rgb(value, value, value);
+        }
+        return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+    }
+
+    private int percentile(int[] histogram, int total, float fraction) {
+        int target = (int) (total * fraction), count = 0;
+        for (int i = 0; i < histogram.length; i++) {
+            count += histogram[i];
+            if (count >= target) return i;
+        }
+        return 255;
     }
 
     private void returnText() {

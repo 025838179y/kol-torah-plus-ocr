@@ -1,4 +1,4 @@
-Third-party components included in this application:
+Third-party components included in Kol Torah Plus OCR:
 
 1. whisper.cpp — MIT License
    https://github.com/ggml-org/whisper.cpp
@@ -6,7 +6,18 @@ Third-party components included in this application:
 2. Tesseract4Android — Apache License 2.0
    https://github.com/adaptech-cz/Tesseract4Android
 
-3. Tesseract OCR Hebrew traineddata (tessdata_best)
+3. Tesseract OCR Hebrew trained data (tessdata_best)
    https://github.com/tesseract-ocr/tessdata_best
 
-The language data is packaged in the APK for offline operation. Consult each upstream repository for complete license terms.
+4. ONNX Runtime for Android — MIT License
+   https://github.com/microsoft/onnxruntime
+
+5. Mishkefet-v1 Hebrew handwriting model
+   Model: https://huggingface.co/itayinbar/Mishkefet-v1
+   Source code: https://github.com/itayinbarr/heb-ocr
+   License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC-BY-NC-SA-4.0).
+   The original PyTorch checkpoint is exported to ONNX and dynamically quantized for local inference.
+   This model is non-commercial only. Attribution and ShareAlike requirements apply to the weights and derivatives.
+   Model licence: https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+The Whisper model and Hebrew OCR trained data are packaged for offline operation. Consult each upstream project for complete license terms. The Mishkefet-v1 model weights must not be used commercially under their published license.
